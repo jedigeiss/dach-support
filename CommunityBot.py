@@ -52,10 +52,7 @@ async def on_message(message):
                     await client.send_message(message.channel, "Die Discord ID <@%s> ist bereits mit der Steem ID %s verknüpft!" % (userID,liste[userID]) )
                     print (liste)           
                     
-        #else:
-         #   await printhelp(message)
-            #await client.send_message(message.channel, "Benutzung: !register direkt gefolgt vom Steemnamen eingeben") #print out usage 
-            #print (liste)           
+                
                     
     if message.content.upper().startswith("§STATUS"): # code for the status command, will list users and basic data about the bot
         embed = discord.Embed(title="D-A-CH Support Status", description="Alive and kickin!", color=0x00ff00)
