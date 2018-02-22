@@ -8,17 +8,32 @@ import pickle
 import os
 from steem import Steem
 from steem.converter import Converter
+from steem.post import Post
+import csv
+import sqlite3
+
+
+
+db = sqlite3.connect("articles.db") # initializing the db that will hold the articles to be voted
+
+c  = db.cursor()
+# initial creation of the table for the articles, uncomment if necessary
+#c.execute(''' CREATE TABLE articles
+#              (kurator text, permlink text, votes real)''') 
+
+db.commit()
 
 Client = discord.Client()
 client = commands.Bot(command_prefix = "?") # currently not used
 fname = "save.txt" # Define the filename for the registered users data
 
 
-if os.path.isfile(fname): # routine to either open an existing file or create a new one
+if os.path.isfile(fname): # routine to either open an existing file or create a new empty one
     liste = pickle.load(open(fname,"rb")) 
 else: 
     print ("File %s does not exist, creating a new one!" % fname)
     liste={}
+
 
 s=Steem()
     
@@ -114,6 +129,7 @@ async def on_message(message):
             resulting_vp = 100
         else:
             resulting_vp = (votingpower+percentup)
+        #print (sbd)
         # building the embed to broadcast via discord    
         embed = discord.Embed(title="Account Übersicht", description=account_name, color=0x00ff00)
         embed.add_field(name="Steem Power", value="%.2f Steempower" % resulting_steempower)
@@ -125,10 +141,54 @@ async def on_message(message):
         embed.set_footer(text="fresh from the blockchain")
         await client.send_message(message.channel, embed=embed) # send the built message
         command_run = 1
+    
+    if message.content.upper().startswith("§UPVOTE"): # code for the upvote command, writes the article and the author into a file to be used by the vote bot
+        if (len(message.content.strip()) > 7) and message.content[7] == " ":
+            args = message.content.split(" ")
+            pos1 = args[1].find("@")
+            check = 0
+            if pos1 <= 0:
+                await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
+                check = check +1
+            else:
+                pos2 = args[1].find("/",pos1)
+                steem_name = (args[1][pos1+1:pos2])
+                length = len(args[1])
+                article = Post(args[1][pos1:length])
+                elapsed = Post.time_elapsed(article)
+                if elapsed >= datetime.timedelta(days=3):
+                    await client.send_message(message.channel, "Fehler - Leider ist der Post älter als 3 Tage")
+                    check = check +1
+                if article.is_main_post() is False:
+                    await client.send_message(message.channel, "Fehler - Kommentare können nicht vorgeschlagen werden")
+                    check = check +1
+                #await client.send_message(message.channel, "Alter des Posts : %s " % elapsed) 
         
+                userID = message.author.id
+                if userID in liste:
+                    registered_name = liste[userID]
+                    if steem_name == registered_name:
+                        await client.send_message(message.channel, "Fehler - Das Vorschlagen eigener Posts ist untersagt!")
+                        check = check +1
+                else:
+                    await client.send_message(message.channel, "Fehler - Dein Steemname ist nicht registriert -- bitte zuerst §register benutzen")
+                    check = check +1
+                if check == 0:
+                    datarow =(registered_name,args[1][pos1:length],1)
+                    # Insert the data into the SQLITE Table
+                    c.execute("INSERT INTO articles VALUES(?,?,?)", datarow)
+                    #member  = discord.utils.get(message.server.members, name=steem_name)
+                    #await client.send_message(member, "Wow - Ein Post von dir wurde von %s beim D-A-CH Support eingereicht!" % registered_name )
+                    db.commit()
+                    await client.send_message(message.channel, "Erfolg - Du hast einen Post von %s beim D-A-CH Support eingereicht!" % steem_name )
+                    
+        else:
+            await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
+
+            
    
     else:
         if message.content.upper().startswith("§") and command_run == 0:
             await printhelp(message)
         command_run =0           
-client.run("yourtokenhere")
+client.run("YourTokenHere")
