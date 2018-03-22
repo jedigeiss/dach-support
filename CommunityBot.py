@@ -162,10 +162,13 @@ async def on_message(message):
                 if rep == 0: # special situation for the new accounts or the ones that never have received a single vote
                     rep = 25
                 else:
+                    neg = rep < 0
+                    rep = abs(rep)
                     rep = math.log10(rep)
-                    rep = (rep -9)*9
-                    rep = rep +25
-                    rep = round (rep,2)
+                    rep = max(rep - 9, 0)
+                    rep = (-1 if neg else 1) * rep
+                    rep = rep * 9 + 25
+                    rep = round(rep, 2)
                     rep = locale.format("%.2f",rep, grouping = False) #locale format
                     
                 now = datetime.datetime.now() # start of the calculation of the current voting power
