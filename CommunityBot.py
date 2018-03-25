@@ -14,7 +14,8 @@ import sqlite3
 import math
 import locale
 from pytz import timezone
-
+from steem.account import Account
+import secrets
 
 locale.setlocale(locale.LC_ALL,'')
 
@@ -27,6 +28,8 @@ c  = db.cursor()
 #              (kurator text, permlink text, votes real)''') 
 #c.execute(''' CREATE TABLE meetup
 #              (planer text, ort text, permlink text, datum timestamp)''') 
+#c.execute(''' CREATE TABLE users
+#              (discordid text, discordname text, steemname text, token text, status text, datum timestamp)''') 
 db.commit()
 
 Client = discord.Client()
@@ -41,6 +44,9 @@ else:
     liste={}
 
 
+stats_info = 0
+stats_meetup = 0
+
 s=Steem()
     
 @client.event
@@ -49,25 +55,44 @@ async def on_ready(): # print on console that the bot is ready
 
 @client.event
 async def printhelp(message): #function to print out help and usage methods
-        embed = discord.Embed(title="D-A-CH Support Help", description="Befehle und Hilfe", color=0x00ff00)
-        #embed.add_field(name="§register", value="Benutzung: §register gefolgt vom Steemnamen eingeben um die Verbindung DiscordID und SteemID zu schaffen", inline=False)
+        embed = discord.Embed(title="D-A-CH Support Help", description="Befehle und Hilfe", color=0x00ff00)        #embed.add_field(name="§register", value="Benutzung: §register gefolgt vom Steemnamen eingeben um die Verbindung DiscordID und SteemID zu schaffen", inline=False)
         embed.add_field(name="?status", value="Benutzung: ?status gibt die registrierten Benutzer und den Status des SteemBots zurück", inline=False)
         embed.add_field(name="?help oder ?hilfe", value="Benutzung: ?help gibt diese Hilfe zurück", inline=False)
         embed.add_field(name="?nextmeetup", value="Benutzung: ?nextmeetup gibt die nächsten Meetups mit allen Infos aus", inline=False)
         embed.add_field(name="?info", value="Benutzung: ?info + steemname gibt Infos zum Steem Account aus, Beispiel ?info dach-support", inline=False)
-        
+        embed.add_field(name="?longinfo", value="Benutzung: ?longinfo + steemname gibt VIELE Infos zum Steem Account aus", inline=False)
+        embed.add_field(name="?register", value="Benutzung: ?register + steemname startet die Registrierung mit dem D-A-CH Support Bot. Bitte den Hinweisen in der PN folgen!", inline=False)
+
         embed.set_thumbnail(url="https://steemitimages.com/DQmSxg3TwiR7ZcTdH9WKH2To48eJsdQ7D1ejpYUmvLtuzUk/steemitdachfullress.png")
         await client.send_message(message.channel, embed=embed)
 
 @client.event
 async def on_message(message):
     command_run=0
-    #if message.content.upper().startswith("§REGISTER"): # code for the !register command
-#        userID = message.author.id
-#        if (len(message.content.strip()) > 9):
-#            args = message.content.split(" ")
-#            if "@" in args[1]:
-#                await client.send_message(message.channel, "Fehler -- Bitte Steem ID ohne @ eingeben!")
+    if message.content.upper().startswith("?REGISTER"): # code to start the cross plattform registration process
+        userID = message.author.id
+        if (len(message.content.strip()) > 9):
+            args = message.content.split(" ")
+            if "@" in args[1]:
+                args[1] = args[1].replace("@","")
+            
+            #check if either the discord or the steem name is already registerd
+            c.execute("SELECT * FROM users where discordname = ? OR steemname = ?", (message.author.name,args[1]))
+            #print("fetchall:")
+            result = c.fetchall() 
+            if len(result)==0:
+                #print ("weder discord noch steem bisher vorhanden")
+                token = secrets.token_hex(32)
+                #print (token)
+                today = datetime.datetime.today()
+                await client.send_message(message.author, "Registrierung von Discord ID <@%s> auf Steem ID @%s eingeleitet!\nToken wurde generiert!\nBitte schicke 0.001 SBD oder Steem an @dach-support mit untenstehender Memo um die Registrierung abzuschliessen!\nMemo: %s" % (userID,args[1],token) )
+                datarow=(userID,message.author.name,args[1],token,"pending steem",today)
+                c.execute ("INSERT INTO users VALUES(?,?,?,?,?,?)", datarow )
+                db.commit()
+                command_run = 1
+            else: 
+                await client.send_message(message.author,"Sorry der Discordname oder der Steemname werden bereits in einer Registrierung verwendet.\nBitte nimm Kontakt mit jedigeiss auf um die Situation zu klären.")
+                command_run = 1
 #            else:    
 #                command_run = 1
 #                if userID not in liste and args[1] not in liste :    
@@ -80,8 +105,105 @@ async def on_message(message):
 #                else:
 #                    await client.send_message(message.channel, "Die Discord ID <@%s> ist bereits mit der Steem ID %s verknüpft!" % (userID,liste[userID]) )
 #                    print (liste)           
-                          
-                    
+#                          
+    if message.content.upper().startswith("?KILLALLUSERS"): # Function to empty the table, only admins can do that, handle with care
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                c.execute("DELETE FROM users")
+                db.commit()
+                executed = 1
+                command_run = 1
+                await client.send_message(message.channel, "Tabelle users wurde geleert!" )
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+            command_run = 1
+    
+    
+    if message.content.upper().startswith("?KILLUSER"): # Function to delete a single line, either by the discord handle or the steem handle
+        executed = 0   
+        for role in message.author.roles:
+            if role.name == "Admin":
+                if (len(message.content.strip()) > 9):
+                    args = message.content.split(" ")
+                    if "@" in args[1]:
+                        args[1] = args[1].replace("@","")
+                    c.execute("SELECT * FROM users where discordname = ? OR steemname = ?", (args[1],args[1]))
+                    result = c.fetchall() 
+                    if len(result)>0:
+                        c.execute("DELETE FROM users where steemname = ? OR discordname = ?",(args[1],args[1]))
+                        db.commit()
+                        executed = 1
+                        command_run = 1
+                        await client.send_message(message.channel, "User %s wurde gelöscht!" %args[1] )
+                    if len(result)==0:
+                        await client.send_message(message.channel, "Kein User %s gefunden!" %args[1] )
+                        executed = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+            command_run = 1
+            
+    if message.content.upper().startswith("?SHOWUSERS"): # shows all users and their status in the registration process
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                c.execute("SELECT * FROM users")
+                result =c.fetchall()
+                for r in result:
+                    await client.send_message(message.channel, "DiscordID: %s, DName: %s, SteemName: %s, Status: %s" % (r[0],r[1],r[2],r[4] )) 
+                command_run = 1    
+                executed = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+
+    if message.content.upper().startswith("?BACK"): # function to set back the status of the registrations to pendings steem, merely for test purposes
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                c.execute("UPDATE users set STATUS = ?", ("pending steem",))
+                db.commit()
+                await client.send_message(message.channel, "jedigeiss zurückgesetzt" )
+                command_run = 1    
+                executed = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+
+            
+    if message.content.upper().startswith("?CHECKREG"): # Function to manually check incoming registrations, needs to be automatized in next version
+            executed = 0
+            for role in message.author.roles:
+                if role.name == "Admin":
+                    account = Account("dach-support")
+                    count = 0
+                    c.execute("SELECT * FROM users WHERE status = ?", ("pending steem",))
+                    result = c.fetchall()
+                    if len(result)==0:
+                        await client.send_message(message.channel, "Keine Registrierungen zum Überprüfen vorhanden!")
+                        
+                    for r in result:
+                        discorduser= r[1]
+                        reguser = r[2]
+                        regtoken =r[3] 
+                        #print (reguser)
+                        
+                        for x in account.history(filter_by=["transfer"]):
+                            steemuser = x["from"]
+                            steemtoken = x["memo"]
+                            if reguser == steemuser and regtoken == steemtoken:
+                                await client.send_message(message.channel, "Token Match!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                c.execute("UPDATE users SET status = ? where discordname = ?", ("registered",discorduser,))
+                                u=discord.User(id=r[0])
+                                await client.send_message(u, "Registrierung mit dem D-A-CH Support Bot abgeschlossen!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                
+                                db.commit()
+                            #print (steemuser)
+                        #print(x)
+                    #await client.send_message(message.channel, "folgende infos vorhanden" % str(count))
+                    executed = 1
+                    command_run =1
+            if executed == 0:
+                await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" ) 
+               
     if message.content.upper().startswith("?STATUS"): # code for the status command, will list users and basic data about the bot
         account_name="dach-support"
         acc_data = s.get_account(account_name)
@@ -109,11 +231,10 @@ async def on_message(message):
         await printhelp(message)
         command_run = 1
 
-        
-    if message.content.upper().startswith("?INFO"): # code for the status command, will list users and basic data about the bot
+    if message.content.upper().startswith("?INFO"): # short info about steemusers
         args = message.content.split(" ")
         try:
-            account_name = str(args[1])
+            account_name = str(args[1]).lower()
             try:
                 today = datetime.datetime.today()
                 sbd = s.get_account(account_name)
@@ -189,6 +310,129 @@ async def on_message(message):
                 latestactivity = max((votetime,time_comment,time_post))
                 latestactivity = latestactivity.replace(tzinfo=timezone('UTC'))
                 latestactivity_cet = latestactivity.astimezone(timezone('Europe/Berlin')) 
+                
+                # building the embed to broadcast via discor
+                embed = discord.Embed(title="Short Account Information", description="[%s](%s)"% (account_name,steemlink), color=0x00ff00)
+                embed.add_field(name="Steem Power", value="%s SP" % resulting_steempower)
+                embed.add_field(name="Votingpower", value="%s Prozent" % resulting_vp)
+                embed.add_field(name="Angemeldet seit", value="%s, %s Tage" % (datetime.datetime.strftime(created,"%d.%m.%Y"),since.days))
+                embed.add_field(name="Reputation", value=rep)
+                embed.add_field(name="Letzte Aktion auf Steem", value=datetime.datetime.strftime(latestactivity_cet,"%d.%m.%Y %H:%M"))
+                
+                embed.set_thumbnail(url=picurl)
+                embed.timestamp=datetime.datetime.utcnow()
+                embed.set_footer(text="frisch von der Blockchain")
+                await client.send_message(message.channel, embed=embed) # send the built message
+                command_run = 1
+                global stats_info 
+                stats_info +=1
+                print( stats_info)
+            except TypeError as err:
+                await client.send_message(message.channel, "Fehler - kein SteemAccount mit dem Namen %s gefunden" % account_name)
+                print (err)
+                command_run = 1
+                stats_info +=1
+                print(stats_info)
+        except IndexError as err:
+            await client.send_message(message.channel, "Fehler - bitte Steemnamen nach §info eingeben")
+            print (err)
+            command_run = 1 
+            
+            
+    if message.content.upper().startswith("?LONGINFO"): # long version of the info about steemusers
+        args = message.content.split(" ")
+        try:
+            account_name = str(args[1]).lower()
+            try:
+                today = datetime.datetime.today()
+                sbd = s.get_account(account_name)
+                #print(sbd)
+                pos1 = (str(sbd["json_metadata"]))
+                posanf = pos1.find("profile_image")
+                if posanf == -1:
+                    picurl="https://coinjournal.net/wp-content/uploads/2016/06/steemit-logo-blockchain-social-media-platform-696x364.png"
+                else:
+                    posanf = posanf +16
+                    posend = pos1.find("\"",posanf)
+                    picurl = (pos1[posanf:posend]) 
+                    
+                steemlink = "https://steemit.com/@"+ account_name
+                #cachedlink=("https://steemitimages.com/u/%s/avatar" % account_name)
+                #print (sbd)
+                #print (cachedlink)
+                #profilepic = "https://img.busy.org/@" + account_name
+                votingpower=float(sbd["voting_power"])
+                votingpower = votingpower / 100
+                SPown = sbd["vesting_shares"].replace("VESTS","") ## start of calculation of most recent Steempower value
+                SPout = sbd["delegated_vesting_shares"].replace("VESTS","")
+                SPout = float(SPout)
+                SPown = float(SPown)
+                SPin = sbd["received_vesting_shares"].replace("VESTS","")
+                SPin = float(SPin)
+                #rank calc
+                if SPown >= 1000000000:
+                    rank = "Wal"
+                elif SPown >=100000000:
+                    rank = "Orca"
+                elif SPown >=10000000:
+                    rank = "Delphin"
+                elif SPown >=1000000:
+                    rank = "Minnow"
+                else:
+                    rank = "Plankton"
+                # converter action to get STEEMPOWER insteaf of vests    
+                conv=Converter()
+                steempower = conv.vests_to_sp(SPown)
+                steempower_out = conv.vests_to_sp(SPout)
+                steempower_in = conv.vests_to_sp(SPin)
+                resulting_steempower = steempower - steempower_out + steempower_in
+                #locales formating
+                steempower = locale.format("%.2f",float(steempower), grouping = True)
+                steempower_out = locale.format("%.2f",float(steempower_out), grouping = True)
+                steempower_in = locale.format("%.2f",float(steempower_in), grouping = True)
+                resulting_steempower = locale.format("%.2f",float(resulting_steempower), grouping = True)
+                SPown = locale.format("%.2f",float(SPown), grouping = True)
+                
+                noposts = sbd["post_count"] # total number of posts
+                votetime = sbd["last_vote_time"] # start of caluclation of actual voting power, need to go some strange ways
+                votetime = votetime.replace("T", " ")
+                votetime = datetime.datetime.strptime(votetime, "%Y-%m-%d %H:%M:%S")
+                created = sbd["created"]
+                created = created.replace("T", " ")
+                created = datetime.datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
+                since = today - created
+                rep = sbd["reputation"] # startpoint of the rep calculation out of the raw reputation
+                rep = float(rep)
+                if rep == 0: # special situation for the new accounts or the ones that never have received a single vote
+                    rep = 25
+                else:
+                    neg = rep < 0
+                    rep = abs(rep)
+                    rep = math.log10(rep)
+                    rep = max(rep - 9, 0)
+                    rep = (-1 if neg else 1) * rep
+                    rep = rep * 9 + 25
+                    rep = round(rep, 2)
+                    rep = locale.format("%.2f",rep, grouping = False) #locale format
+                    
+                now = datetime.datetime.now() # start of the calculation of the current voting power
+                time_vp = now - votetime
+                percentup = (int(((time_vp.total_seconds())/60)-60)*0.0139)
+                if ((votingpower+percentup)>100): # capping the vote percentage at 100 
+                    resulting_vp = 100
+                else:
+                    resulting_vp = (votingpower+percentup)
+                resulting_vp = locale.format("%.2f",resulting_vp)
+                
+                time_comment = sbd["last_post"] # start of caluclation of last activity information
+                time_comment = time_comment.replace("T", " ")
+                time_comment = datetime.datetime.strptime(time_comment, "%Y-%m-%d %H:%M:%S")
+                time_post = sbd["last_root_post"] 
+                time_post = time_post.replace("T", " ")
+                time_post = datetime.datetime.strptime(time_post, "%Y-%m-%d %H:%M:%S")
+                latestactivity = max((votetime,time_comment,time_post))
+                latestactivity = latestactivity.replace(tzinfo=timezone('UTC'))
+                latestactivity_cet = latestactivity.astimezone(timezone('Europe/Berlin')) 
                 #building and localizing the amount of steem and savings
                 amount_steem = (sbd["balance"].replace(" STEEM",""))
                 amount_steem =  locale.format("%.2f",float(amount_steem), grouping = True)
@@ -213,6 +457,9 @@ async def on_message(message):
                 embed.add_field(name="Kontostand SBD (Save)", value="%s (%s) SBD"% (amount_sbd,amount_sbd_savings))
                 embed.add_field(name="Angemeldet seit", value="%s, %s Tage" % (datetime.datetime.strftime(created,"%d.%m.%Y"),since.days))
                 embed.add_field(name="Reputation", value=rep)
+                embed.add_field(name="Rang",value=rank)
+                embed.add_field(name="MVests", value="%s" % SPown)
+                embed.add_field(name="Anzahl Posts", value=noposts)
                 embed.add_field(name="Letzte Aktion auf Steem", value=datetime.datetime.strftime(latestactivity_cet,"%d.%m.%Y %H:%M"))
                 
                 embed.set_thumbnail(url=picurl)
@@ -220,10 +467,15 @@ async def on_message(message):
                 embed.set_footer(text="frisch von der Blockchain")
                 await client.send_message(message.channel, embed=embed) # send the built message
                 command_run = 1
+                #global stats_info 
+                #stats_info +=1
+                #print( stats_info)
             except TypeError as err:
                 await client.send_message(message.channel, "Fehler - kein SteemAccount mit dem Namen %s gefunden" % account_name)
                 print (err)
                 command_run = 1
+                #stats_info +=1
+                #print(stats_info)
         except IndexError as err:
             await client.send_message(message.channel, "Fehler - bitte Steemnamen nach §info eingeben")
             print (err)
@@ -293,7 +545,7 @@ async def on_message(message):
 #        await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: /n %s " % result )
 #        
         
-    if message.content.upper().startswith("?ADDMEETUP"):
+    if message.content.upper().startswith("?ADDMEETUP"): # function to add new meetings, only usable by Admins
         executed = 0
         for role in message.author.roles:
             if role.name == "Admin":
@@ -315,14 +567,15 @@ async def on_message(message):
     
         
         
-    if message.content.upper().startswith("?NEXTMEETUP"):
+    if message.content.upper().startswith("?NEXTMEETUP"): # funtion to display upoming meetings
         default = 4
+        today = datetime.datetime.today()
         if (len(message.content.strip()) > 11) and message.content[11] == " ":
             args = message.content.split(" ")
             if args[1].isdigit():
                 default = args[1]
             
-        c.execute("SELECT * FROM meetup ORDER BY date(\"datum\") ASC LIMIT (?)", (default,))
+        c.execute("SELECT * FROM meetup WHERE datum > (?) ORDER BY date(\"datum\") ASC LIMIT (?)", (today,default,))
         #print("fetchall:")
         result = c.fetchall() 
         if len(result)==0:
@@ -342,26 +595,25 @@ async def on_message(message):
                 deltadays = r[3] - today
                 daystomeetup = deltadays.days
                 
-                if deltadays.days >= -2:
-                    if deltadays.days == 0:
-                        daystomeetup = ("Morgen")
-                    if deltadays.days == -1:
-                        daystomeetup = ("Heute")
-                    
-                    embed = discord.Embed(title="Nächstes Meetup in: %s" % r[0], description="", color=0x00ff00)
-                    embed.add_field(name="Planer", value="[%s](%s)" % (str(r[1]),"https://steemit.com/@"+str(r[1])))
-                    embed.add_field(name="Link", value="[Link zum Steemit-Post](%s) " % str(r[2]), inline=True)
-                    embed.add_field(name="Datum", value="%s" % datetime.datetime.strftime(r[3],"%d.%m.%Y"), inline=True)
-                    embed.add_field(name="Tage bis zum Meetup", value="%s" % daystomeetup, inline=True)
-                    embed.set_thumbnail(url=(picdest[posanf:posend]))
-                    embed.timestamp=datetime.datetime.utcnow()
-                    embed.set_footer(text="fresh from the DACH-BOT")
-                    await client.send_message(message.channel, embed=embed)
-                    command_run = 1
-                else:
-                    #await client.send_message(message.channel, "Derzeit sind keine Meetups geplant" )
-                    command_run = 1
-        
+                
+                if deltadays.days == 0:
+                    daystomeetup = ("Morgen")
+                if deltadays.days == -1:
+                    daystomeetup = ("Heute")
+                
+                embed = discord.Embed(title="Nächstes Meetup in: %s" % r[0], description="", color=0x00ff00)
+                embed.add_field(name="Planer", value="[%s](%s)" % (str(r[1]),"https://steemit.com/@"+str(r[1])))
+                embed.add_field(name="Link", value="[Link zum Steemit-Post](%s) " % str(r[2]), inline=True)
+                embed.add_field(name="Datum", value="%s" % datetime.datetime.strftime(r[3],"%d.%m.%Y"), inline=True)
+                embed.add_field(name="Tage bis zum Meetup", value="%s" % daystomeetup, inline=True)
+                embed.set_thumbnail(url=(picdest[posanf:posend]))
+                embed.timestamp=datetime.datetime.utcnow()
+                embed.set_footer(text="fresh from the DACH-BOT")
+                await client.send_message(message.channel, embed=embed)
+                command_run = 1
+                global stats_meetup
+                stats_meetup += 1
+                print(stats_meetup)
                 
         
     if message.content.upper().startswith("?KILLMEETUP"): # Function to empty the table, only admins can do that, handle with care
@@ -371,11 +623,32 @@ async def on_message(message):
                 c.execute("DELETE FROM meetup")
                 db.commit()
                 executed = 1
+                await client.send_message(message.channel, "Tabelle meetup wurde geleert!" )
+                command_run = 1
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-        
+            command_run = 1
                 
-        
+    if message.content.upper().startswith("?MÄCHTIGERÖSI"): # special function for theaustrianguy and his welcoming project
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                account = Account("welcoming")
+                count = 0
+                for x in account.history(filter_by=["custom_json"]):
+                    if "reblog" in str(x):
+                        count = count + 1
+                #print(str(count))
+                await client.send_message(message.channel, "Der mächtige Ösi hat mit Welcoming %s Posts resteemed" % str(count) ) 
+                executed = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )    
+    
+    if message.content.upper().startswith("?VERSION"): # display of version and thanks
+        await client.send_message(message.channel, "D-A-CH Bot Version 0.35, brought to you by jedigeiss\nThanks to: louis88, rivalzzz, theaustrianguy, asperger-kids and mys" )
+        command_run = 1
+        print("test")
+    
     else:
         if message.content.upper().startswith("?") and command_run == 0 and len(message.content.strip()) > 2 :
             await printhelp(message)
