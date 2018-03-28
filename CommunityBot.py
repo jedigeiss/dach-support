@@ -25,11 +25,15 @@ db = sqlite3.connect("articles.db", detect_types=sqlite3.PARSE_DECLTYPES) # init
 c  = db.cursor()
 # initial creation of the table for the articles, uncomment if necessary
 #c.execute(''' CREATE TABLE articles
-#              (kurator text, permlink text, votes real)''') 
-#c.execute(''' CREATE TABLE meetup
+#              (kurator text, permlink text, votes real, voted text, title text, author text )''') 
+#c.execute(''' CREATE TABLE meetup 
 #              (planer text, ort text, permlink text, datum timestamp)''') 
 #c.execute(''' CREATE TABLE users
 #              (discordid text, discordname text, steemname text, token text, status text, datum timestamp)''') 
+#c.execute(''' Alter table articles add column voted text''')
+#c.execute(''' Alter table articles add column autor text''')
+#c.execute(''' Alter table users add column has_voted text''')
+#c.execute (''' Drop Table articles''')
 db.commit()
 
 Client = discord.Client()
@@ -62,6 +66,8 @@ async def printhelp(message): #function to print out help and usage methods
         embed.add_field(name="?info", value="Benutzung: ?info + steemname gibt Infos zum Steem Account aus, Beispiel ?info dach-support", inline=False)
         embed.add_field(name="?longinfo", value="Benutzung: ?longinfo + steemname gibt VIELE Infos zum Steem Account aus", inline=False)
         embed.add_field(name="?register", value="Benutzung: ?register + steemname startet die Registrierung mit dem D-A-CH Support Bot. Bitte den Hinweisen in der PN folgen!", inline=False)
+        embed.add_field(name="?upvote", value="Benutzung: ?upvote + linkzumartikel gibt die Stimme für den Artikel ab, das wird benutzt um den D-A-CH Bot voten zu lassen", inline=False)
+        embed.add_field(name="?showarticles", value="Benutzung: ?showarticles zeigt eine Liste der bisher gevoteten Artikel an", inline=False)
 
         embed.set_thumbnail(url="https://steemitimages.com/DQmSxg3TwiR7ZcTdH9WKH2To48eJsdQ7D1ejpYUmvLtuzUk/steemitdachfullress.png")
         await client.send_message(message.channel, embed=embed)
@@ -86,8 +92,8 @@ async def on_message(message):
                 #print (token)
                 today = datetime.datetime.today()
                 await client.send_message(message.author, "Registrierung von Discord ID <@%s> auf Steem ID @%s eingeleitet!\nToken wurde generiert!\nBitte schicke 0.001 SBD oder Steem an @dach-support mit untenstehender Memo um die Registrierung abzuschliessen!\nMemo: %s" % (userID,args[1],token) )
-                datarow=(userID,message.author.name,args[1],token,"pending steem",today)
-                c.execute ("INSERT INTO users VALUES(?,?,?,?,?,?)", datarow )
+                datarow=(userID,message.author.name,args[1],token,"pending steem",today,"No")
+                c.execute ("INSERT INTO users VALUES(?,?,?,?,?,?,?)", datarow )
                 db.commit()
                 command_run = 1
             else: 
@@ -106,18 +112,18 @@ async def on_message(message):
 #                    await client.send_message(message.channel, "Die Discord ID <@%s> ist bereits mit der Steem ID %s verknüpft!" % (userID,liste[userID]) )
 #                    print (liste)           
 #                          
-    if message.content.upper().startswith("?KILLALLUSERS"): # Function to empty the table, only admins can do that, handle with care
-        executed = 0
-        for role in message.author.roles:
-            if role.name == "Admin":
-                c.execute("DELETE FROM users")
-                db.commit()
-                executed = 1
-                command_run = 1
-                await client.send_message(message.channel, "Tabelle users wurde geleert!" )
-        if executed == 0:
-            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-            command_run = 1
+#    if message.content.upper().startswith("?KILLALLUSERS"): # Function to empty the table, only admins can do that, handle with care
+#        executed = 0
+#        for role in message.author.roles:
+#            if role.name == "Admin":
+#                c.execute("DELETE FROM users")
+#                db.commit()
+#                executed = 1
+#                command_run = 1
+#                await client.send_message(message.channel, "Tabelle users wurde geleert!" )
+#        if executed == 0:
+#            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+#            command_run = 1
     
     
     if message.content.upper().startswith("?KILLUSER"): # Function to delete a single line, either by the discord handle or the steem handle
@@ -147,10 +153,17 @@ async def on_message(message):
         executed = 0
         for role in message.author.roles:
             if role.name == "Admin":
-                c.execute("SELECT * FROM users")
+                if (len(message.content.strip()) > 9):
+                    args = message.content.split(" ")
+                    if args[1] == "all":
+                        c.execute("SELECT * FROM users")
+                    else:
+                        users = str(args[1])
+                        c.execute("SELECT * FROM users where steemname = ?", (users,))
+                
                 result =c.fetchall()
                 for r in result:
-                    await client.send_message(message.channel, "DiscordID: %s, DName: %s, SteemName: %s, Status: %s" % (r[0],r[1],r[2],r[4] )) 
+                    await client.send_message(message.channel, "DiscordID: %s, DName: %s, SteemName: %s, Status: %s Voted: %s" % (r[0],r[1],r[2],r[4],r[6] )) 
                 command_run = 1    
                 executed = 1
         if executed == 0:
@@ -160,7 +173,7 @@ async def on_message(message):
         executed = 0
         for role in message.author.roles:
             if role.name == "Admin":
-                c.execute("UPDATE users set STATUS = ?", ("pending steem",))
+                c.execute("UPDATE users set STATUS = ? where steemname = ?", ("pending steem","jedigeiss",))
                 db.commit()
                 await client.send_message(message.channel, "jedigeiss zurückgesetzt" )
                 command_run = 1    
@@ -179,26 +192,31 @@ async def on_message(message):
                     result = c.fetchall()
                     if len(result)==0:
                         await client.send_message(message.channel, "Keine Registrierungen zum Überprüfen vorhanden!")
-                        
-                    for r in result:
-                        discorduser= r[1]
-                        reguser = r[2]
-                        regtoken =r[3] 
-                        #print (reguser)
-                        
-                        for x in account.history(filter_by=["transfer"]):
-                            steemuser = x["from"]
-                            steemtoken = x["memo"]
-                            if reguser == steemuser and regtoken == steemtoken:
-                                await client.send_message(message.channel, "Token Match!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
-                                c.execute("UPDATE users SET status = ? where discordname = ?", ("registered",discorduser,))
-                                u=discord.User(id=r[0])
-                                await client.send_message(u, "Registrierung mit dem D-A-CH Support Bot abgeschlossen!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                    elif len(result)>0:
+                        found = 0
+                        for r in result:
+                            discorduser= r[1]
+                            reguser = r[2]
+                            regtoken =r[3] 
+                            #print (reguser)
+                            
+                            
+                            for x in account.history(filter_by=["transfer"]):
+                                steemuser = x["from"]
+                                steemtoken = x["memo"]
+                                if reguser == steemuser and regtoken == steemtoken:
+                                    await client.send_message(message.channel, "Token Match!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                    c.execute("UPDATE users SET status = ? where discordname = ?", ("registered",discorduser,))
+                                    u=discord.User(id=r[0])
+                                    await client.send_message(u, "Registrierung mit dem D-A-CH Support Bot abgeschlossen!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                    found = 1
+                                    db.commit()
+                                #print (steemuser)
+                            #print(x)
+                        #await client.send_message(message.channel, "folgende infos vorhanden" % str(count))
+                    if found == 0:
+                        await client.send_message(message.channel, "Keine passenden Token in den eingehenden Transaktionen gefunden!")
                                 
-                                db.commit()
-                            #print (steemuser)
-                        #print(x)
-                    #await client.send_message(message.channel, "folgende infos vorhanden" % str(count))
                     executed = 1
                     command_run =1
             if executed == 0:
@@ -212,9 +230,9 @@ async def on_message(message):
         votetime = acc_data["last_vote_time"] # start of caluclation of actual voting power, need to go some strange ways
         votetime = votetime.replace("T", " ")
         votetime = datetime.datetime.strptime(votetime, "%Y-%m-%d %H:%M:%S")
-        now = datetime.datetime.now()
+        now = datetime.datetime.utcnow()
         time_vp = now - votetime
-        percentup = (int(((time_vp.total_seconds())/60)-60)*0.0139)
+        percentup = (int(((time_vp.total_seconds())/60))*0.0139)
         if ((votingpower+percentup)>100): # capping the vote percentage at 100 
             resulting_vp = 100
         else:
@@ -292,9 +310,9 @@ async def on_message(message):
                     rep = round(rep, 2)
                     rep = locale.format("%.2f",rep, grouping = False) #locale format
                     
-                now = datetime.datetime.now() # start of the calculation of the current voting power
+                now = datetime.datetime.utcnow() # start of the calculation of the current voting power
                 time_vp = now - votetime
-                percentup = (int(((time_vp.total_seconds())/60)-60)*0.0139)
+                percentup = (int((time_vp.total_seconds())/60)*0.0139)
                 if ((votingpower+percentup)>100): # capping the vote percentage at 100 
                     resulting_vp = 100
                 else:
@@ -415,9 +433,9 @@ async def on_message(message):
                     rep = round(rep, 2)
                     rep = locale.format("%.2f",rep, grouping = False) #locale format
                     
-                now = datetime.datetime.now() # start of the calculation of the current voting power
+                now = datetime.datetime.utcnow() # start of the calculation of the current voting power
                 time_vp = now - votetime
-                percentup = (int(((time_vp.total_seconds())/60)-60)*0.0139)
+                percentup = (int((time_vp.total_seconds())/60)*0.0139)
                 if ((votingpower+percentup)>100): # capping the vote percentage at 100 
                     resulting_vp = 100
                 else:
@@ -482,69 +500,126 @@ async def on_message(message):
             command_run = 1
         
     
-#    if message.content.upper().startswith("§UPVOTE"): # code for the upvote command, writes the article and the author into a file to be used by the vote bot
-#        if (len(message.content.strip()) > 7) and message.content[7] == " ":
-#            args = message.content.split(" ")
-#            pos1 = args[1].find("@")
-#            check = 0
-#            if pos1 <= 0:
-#                await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
-#                check = check +1
-#            else:
-#                pos2 = args[1].find("/",pos1)
-#                steem_name = (args[1][pos1+1:pos2])
-#                length = len(args[1])
-#                article = Post(args[1][pos1:length])
-#                elapsed = Post.time_elapsed(article)
-#                if elapsed >= datetime.timedelta(days=3):
-#                    await client.send_message(message.channel, "Fehler - Leider ist der Post älter als 3 Tage")
-#                    check = check +1
-#                    command_run = 1
-#                if article.is_main_post() is False:
-#                    await client.send_message(message.channel, "Fehler - Kommentare können nicht vorgeschlagen werden")
-#                    check = check +1
-#                    command_run = 1
-#                #await client.send_message(message.channel, "Alter des Posts : %s " % elapsed) 
-#        
-#                userID = message.author.id
-#                if userID in liste:
-#                    registered_name = liste[userID]
-#                    if steem_name == registered_name:
-#                        await client.send_message(message.channel, "Fehler - Das Vorschlagen eigener Posts ist untersagt!")
-#                        check = check +1
-#                else:
-#                    await client.send_message(message.channel, "Fehler - Dein Steemname ist nicht registriert -- bitte zuerst §register benutzen")
-#                    check = check +1
-#                c.execute("SELECT permlink FROM articles WHERE permlink = (?)", (args[1][pos1:length],))
-#                result = c.fetchone()
-#                if result is not None: # Check if the article is already in the database
-#                    await client.send_message(message.channel, "Fehler - Artikel wurde schon vorgeschlagen")
-#                    check = 5
-#                    command_run = 1
-#                    
-#                if check == 0:
-#                    datarow =(registered_name,args[1][pos1:length],1)
-#                    # Insert the data into the SQLITE Table
-#                    c.execute("INSERT INTO articles VALUES(?,?,?)", datarow)
-#                    #member  = discord.utils.get(message.server.members, name=steem_name)
-#                    #await client.send_message(member, "Wow - Ein Post von dir wurde von %s beim D-A-CH Support eingereicht!" % registered_name )
-#                    db.commit()
-#                    command_run = 1
-#                    await client.send_message(message.channel, "Erfolg - Du hast einen Post von %s beim D-A-CH Support eingereicht!" % steem_name )
-#                    
-#        else:
-#            await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
-
+    if message.content.upper().startswith("?UPVOTE"): # code for the upvote command, writes the article and the author into a file to be used by the vote bot
+        if (len(message.content.strip()) > 7) and message.content[7] == " ":
+            args = message.content.split(" ")
+            pos1 = args[1].find("@")
+            check = 0
+            if pos1 <= 0:
+                await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
+                check = check +1
+            else:
+                pos2 = args[1].find("/",pos1)
+                steem_name = (args[1][pos1+1:pos2])
+                length = len(args[1])
+                article = Post(args[1][pos1:length])
+               
+                elapsed = Post.time_elapsed(article)
+                if elapsed >= datetime.timedelta(days=3):
+                    await client.send_message(message.channel, "Fehler - Leider ist der Post älter als 3 Tage")
+                    check = check +1
+                    command_run = 1
+                if article.is_main_post() is False:
+                    await client.send_message(message.channel, "Fehler - Kommentare können nicht vorgeschlagen werden")
+                    check = check +1
+                    command_run = 1
+                #await client.send_message(message.channel, "Alter des Posts : %s " % elapsed) 
+        
+                userID = message.author.id
+                c.execute("SELECT * FROM users WHERE discordid = (?) and status = ?", (userID,"registered",))
+                result = c.fetchone()
+                curator_name= result[2]
+                if result is None:
+                    await client.send_message(message.channel, "Upvote kann nur von registrierten Mitgliedern benutzt werden -- bitte zuerst ?register aufrufen!")
+                    check = check +1 
+                    command_run = 1
+                elif result[6] == "Yes":
+                    await client.send_message(message.channel, "Du hast heute schon einmal gevoted!")
+                    check = check +1
+                    command_run = 1
+                else:
+                    registered_name = result[1]
+                    
+                    if curator_name == steem_name:
+                        await client.send_message(message.channel, "Fehler - Das Vorschlagen eigener Posts ist untersagt!")
+                        check = check +1
+                    else:
+                        #check if the article is already in the list to vote
+                        c.execute("SELECT * FROM articles WHERE permlink = (?)", (args[1][pos1:length],))
+                        result = c.fetchone()
+                        if result is not None and result[3] == "No": # Check if the article is already in the database and has not already been voted
+                            votes=result[2]
+                            votes = votes +1
+                            await client.send_message(message.channel, "Artikel wurde bereits vorgeschlagen, erhöhe die Votes um 1")
+                            c.execute("UPDATE articles SET votes = ? where permlink = ?", (votes,args[1][pos1:length],))
+                            c.execute("UPDATE users SET has_voted = ? where steemname = ?", ("Yes",curator_name,))
+                            db.commit()
+                            check = 5
+                            command_run = 1
+                            
+                if check == 0:
+                    
+                    
+                    data = article.export()
+                    title=data["title"]
+                    author = data["author"]
+                    #print (title)
+                    datarow =(registered_name,args[1][pos1:length],1,"No",title,author)
+                    
+                    # Insert the data into the SQLITE Table
+                    c.execute("INSERT INTO articles VALUES(?,?,?,?,?,?)", datarow)
+                    c.execute("UPDATE users SET has_voted = ? where steemname = ?", ("Yes",curator_name,))
+                    #member  = discord.utils.get(message.server.members, name=steem_name)
+                    #await client.send_message(member, "Wow - Ein Post von dir wurde von %s beim D-A-CH Support eingereicht!" % registered_name )
+                    db.commit()
+                    command_run = 1
+                    await client.send_message(message.channel, "Erfolg - Du hast einen Post von %s beim D-A-CH Support eingereicht!" % steem_name )
+                    
+        else:
+            await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
+            command_run =1
             
-#    if message.content.upper().startswith("§CHECK"):
-#        c.execute("SELECT * FROM meetup")
-#        print("fetchall:")
+#    if message.content.upper().startswith("?CHECKART"):
+#        c.execute("SELECT * FROM articles")
 #        result = c.fetchall() 
 #        for r in result:
 #            print(r)        
-#        await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: /n %s " % result )
-#        
+#        await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: \n %s " % result )
+#        command_run =1
         
+    if message.content.upper().startswith("?SHOWARTICLES"):
+        c.execute("SELECT * FROM articles where voted = ? ORDER BY votes DESC", ("No",))
+        result = c.fetchall() 
+        for r in result:
+            #print(r)        
+            
+            embed = discord.Embed(title="Artikel:" , description="[%s](%s)" % (str(r[4]),"https://steemit.com/"+str(r[1])), color=0x00ff00)
+            embed.add_field(name="Autor", value="[%s](%s) " % (str(r[5]),"https://steemit.com/@"+str(r[5])), inline=True)
+            #embed.add_field(name="Kurator", value="%s" % r[0], inline=True)
+            embed.add_field(name="Votes", value="%s" % int(r[2]), inline=True)
+            embed.set_thumbnail(url="")
+            #embed.timestamp=datetime.datetime.utcnow()
+            #embed.set_footer(text="fresh from the DACH-BOT")
+            await client.send_message(message.channel, embed=embed)
+        #await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: \n %s " % result )
+        command_run =1
+
+
+    
+    if message.content.upper().startswith("?KILLART"): # Function to empty the table, only admins can do that, handle with care
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                c.execute("DELETE FROM articles")
+                db.commit()
+                executed = 1
+                await client.send_message(message.channel, "Tabelle articles wurde geleert!" )
+                command_run = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+            command_run = 1    
+    
+    
     if message.content.upper().startswith("?ADDMEETUP"): # function to add new meetings, only usable by Admins
         executed = 0
         for role in message.author.roles:
@@ -641,13 +716,52 @@ async def on_message(message):
                 #print(str(count))
                 await client.send_message(message.channel, "Der mächtige Ösi hat mit Welcoming %s Posts resteemed" % str(count) ) 
                 executed = 1
+                command_run = 1
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )    
-    
+            command_run = 1
+            
+            
     if message.content.upper().startswith("?VERSION"): # display of version and thanks
-        await client.send_message(message.channel, "D-A-CH Bot Version 0.35, brought to you by jedigeiss\nThanks to: louis88, rivalzzz, theaustrianguy, asperger-kids and mys" )
+        await client.send_message(message.channel, "D-A-CH Bot Version 0.4, brought to you by jedigeiss\nThanks to: louis88, rivalzzz, theaustrianguy, asperger-kids and mys" )
         command_run = 1
-        print("test")
+        
+    
+    if message.content.upper().startswith("?VOTE"):
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":# very basic voting functionality
+                executed =1
+                if(len(message.content.strip()) > 4) and message.content[5] == " ":
+                    args = message.content.split(" ")
+                    pos1 = args[1].find("@")
+                    check = 0
+                    if pos1 <= 0:
+                        await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
+                       # check = check +1
+                    else:
+                        pos2 = args[1].find("/",pos1)
+                        steem_name = (args[1][pos1+1:pos2])
+                        length = len(args[1])
+                        article = (args[1][pos1:length])
+                        #print (article)
+                        percentage = int(args[2])
+                        #print (percentage)
+                        #print (permlink)
+                        #print (percentage)
+                        try: 
+                            s.vote(article,percentage)
+                            await client.send_message(message.channel, "Artikel %s erfolgreich mit %.2f Prozent gevoted!" % (article,percentage))
+                        except Exception as e:
+                            print (repr(e))
+                            await client.send_message(message.channel, "Da ging was schief! Hast du vielleicht für den Artikel schon gevoted?")
+                else: 
+                    await client.send_message(message.channel, "Bitte ?vote Permlink Prozent benutzen!")
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast keine Berechtigung den Befehl auszuführen!")
+            command_run =1
+    
+    
     
     else:
         if message.content.upper().startswith("?") and command_run == 0 and len(message.content.strip()) > 2 :
