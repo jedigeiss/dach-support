@@ -20,8 +20,9 @@ Additionally you need to set a node with the steempy utility by executing for in
 
 steempy set nodes https://gtg.steem.house:8090/ or use https://rpc.buildteam.io for instance.
 
-To use the manuel vote function implemented within the bot you have to also setup the account to use for this
-This can be done by uttering the followin command
+To use the manuel vote function implemented within the bot you have to also setup the account to use for this.
+
+This can be done by uttering the following command
 
 steempy importaccount "youraccount"
 
