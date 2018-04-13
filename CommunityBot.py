@@ -4,12 +4,10 @@ from discord.ext import commands
 import asyncio
 import time
 import datetime
-import pickle
 import os
 from steem import Steem
 from steem.converter import Converter
 from steem.post import Post
-import csv
 import sqlite3
 import math
 import locale
@@ -17,10 +15,13 @@ from pytz import timezone
 from steem.account import Account
 import secrets
 import logging
-import logging.handlers as handlers
+#import logging.handlers as handlers
+from coinmarketcap import Market
+import json
+from weather import Weather, Unit
+from chuck import ChuckNorris
 
-
-locale.setlocale(locale.LC_ALL,'')
+locale.setlocale(locale.LC_ALL, '')
 
 logger = logging.getLogger("DachBot")
 logger.setLevel(logging.INFO)
@@ -36,36 +37,31 @@ logger.addHandler(logHandler)
 
 db = sqlite3.connect("articles.db", detect_types=sqlite3.PARSE_DECLTYPES) # initializing the db that will hold the articles to be voted
 
-c  = db.cursor()
-# initial creation of the table for the articles, uncomment if necessary
-#c.execute(''' CREATE TABLE articles
-#              (kurator text, permlink text, votes real, voted text, title text, author text )''') 
-#c.execute(''' CREATE TABLE meetup 
-#              (planer text, ort text, permlink text, datum timestamp)''') 
-#c.execute(''' CREATE TABLE users
-#              (discordid text, discordname text, steemname text, token text, status text, datum timestamp)''') 
-#c.execute(''' Alter table articles add column voted text''')
-#c.execute(''' Alter table articles add column autor text''')
-#c.execute(''' Alter table users add column has_voted text''')
-#c.execute (''' Drop Table articles''')
-#db.commit()
-
+c = db.cursor()
+# database creation for the first run
+# =============================================================================
+#  initial creation of the table for the articles, uncomment if necessary
+# c.execute(''' CREATE TABLE articles
+#               (kurator text, permlink text, votes real, voted text, title text, author text )''') 
+# c.execute(''' CREATE TABLE meetup 
+#               (planer text, ort text, permlink text, datum timestamp)''') 
+# c.execute(''' CREATE TABLE users
+#               (discordid text, discordname text, steemname text, token text, status text, datum timestamp)''') 
+# db.commit()
+# 
+# =============================================================================
 Client = discord.Client()
 client = commands.Bot(command_prefix = "?") # currently not used
-#fname = "save.txt" # Define the filename for the registered users data
 
 
-#if os.path.isfile(fname): # routine to either open an existing file or create a new empty one
-#    liste = pickle.load(open(fname,"rb")) 
-#else: 
-#    print ("File %s does not exist, creating a new one!" % fname)
-#    liste={}
-
-
-
-
+# creation of the connection to the steem blockchain
 steemPostingKey = os.environ.get('steemPostingKey')
 s = Steem(wif=steemPostingKey)
+
+@client.event
+async def on_member_join(member):
+    await client.send_message(member,"Wilkommen zum Steemit D-A-CH Discord.\nHilfe kannst du unter anderem im Kanal #fragen-zu-steem finden.\nWir haben einen D-A-CH Support Bot der nicht nur diese Nachricht schickt sondern darüberhinaus viele weitere Fähigkeiten hat. Diese könnt ihr über den Befehl ?hilfe kennenlernen.\nViel Spaß auf dem Server!")
+    logger.info("Neues Mitglied ist gejoint %s", member.name)
     
 @client.event
 async def on_ready(): # print on console that the bot is ready
@@ -74,18 +70,21 @@ async def on_ready(): # print on console that the bot is ready
 
 @client.event
 async def printhelp(message): #function to print out help and usage methods
-        embed = discord.Embed(title="D-A-CH Support Help", description="Befehle und Hilfe", color=0x00ff00)        #embed.add_field(name="§register", value="Benutzung: §register gefolgt vom Steemnamen eingeben um die Verbindung DiscordID und SteemID zu schaffen", inline=False)
-        embed.add_field(name="?status", value="Benutzung: ?status gibt die registrierten Benutzer und den Status des SteemBots zurück", inline=False)
-        embed.add_field(name="?help oder ?hilfe", value="Benutzung: ?help gibt diese Hilfe zurück", inline=False)
-        embed.add_field(name="?nextmeetup", value="Benutzung: ?nextmeetup gibt die nächsten Meetups mit allen Infos aus", inline=False)
-        embed.add_field(name="?info", value="Benutzung: ?info + steemname gibt Infos zum Steem Account aus, Beispiel ?info dach-support", inline=False)
-        embed.add_field(name="?longinfo", value="Benutzung: ?longinfo + steemname gibt VIELE Infos zum Steem Account aus", inline=False)
-        embed.add_field(name="?register", value="Benutzung: ?register + steemname startet die Registrierung mit dem D-A-CH Support Bot. Bitte den Hinweisen in der PN folgen!", inline=False)
-        embed.add_field(name="?upvote", value="Benutzung: ?upvote + linkzumartikel gibt die Stimme für den Artikel ab, das wird benutzt um den D-A-CH Bot voten zu lassen", inline=False)
-        embed.add_field(name="?showarticles", value="Benutzung: ?showarticles zeigt eine Liste der bisher gevoteten Artikel an", inline=False)
+    embed = discord.Embed(title="D-A-CH Support Help", description="Befehle und Hilfe", color=0x00ff00)        #embed.add_field(name="§register", value="Benutzung: §register gefolgt vom Steemnamen eingeben um die Verbindung DiscordID und SteemID zu schaffen", inline=False)
+    embed.add_field(name="?status", value="Benutzung: ?status gibt die registrierten Benutzer und den Status des SteemBots zurück", inline=False)
+    embed.add_field(name="?hilfe", value="Benutzung: ?hilfe gibt diese Hilfe zurück", inline=False)
+    embed.add_field(name="?nextmeetup", value="Benutzung: ?nextmeetup gibt die nächsten Meetups mit allen Infos aus", inline=False)
+    embed.add_field(name="?info", value="Benutzung: ?info + steemname gibt Infos zum Steem Account aus, Beispiel ?info dach-support", inline=False)
+    embed.add_field(name="?longinfo", value="Benutzung: ?longinfo + steemname gibt VIELE Infos zum Steem Account aus", inline=False)
+    embed.add_field(name="?register", value="Benutzung: ?register + steemname startet die Registrierung mit dem D-A-CH Support Bot. Bitte den Hinweisen in der PN folgen!", inline=False)
+    embed.add_field(name="?upvote", value="Benutzung: ?upvote + linkzumartikel gibt die Stimme für den Artikel ab, das wird benutzt um den D-A-CH Bot voten zu lassen", inline=False)
+    embed.add_field(name="?showarticles", value="Benutzung: ?showarticles zeigt eine Liste der bisher eingereichten Artikel an", inline=False)
+    embed.add_field(name="?showvoted", value="Benutzung: ?showvoted zeigt eine Liste der in der Vergangenheit gevoteten Artikel an", inline=False)
+    embed.add_field(name="?kurs", value="Benutzung: ?kurs steem zeigt den aktuellen Kurs von Steem auf Coinmarketcap an", inline=False)
+    embed.add_field(name="?wetter", value="Benutzung: ?wetter *stadt* zeigt aktuelles Wetter und die Vorschau an", inline=False)
 
-        embed.set_thumbnail(url="https://steemitimages.com/DQmSxg3TwiR7ZcTdH9WKH2To48eJsdQ7D1ejpYUmvLtuzUk/steemitdachfullress.png")
-        await client.send_message(message.channel, embed=embed)
+    embed.set_thumbnail(url="https://steemitimages.com/DQmSxg3TwiR7ZcTdH9WKH2To48eJsdQ7D1ejpYUmvLtuzUk/steemitdachfullress.png")
+    await client.send_message(message.channel, embed=embed)
 
 @client.event
 async def on_message(message):
@@ -103,7 +102,6 @@ async def on_message(message):
             #print("fetchall:")
             result = c.fetchall() 
             if len(result)==0:
-                logger.info("Registrierung gestartet für User %s ")
                 token = secrets.token_hex(32)
                 #print (token)
                 today = datetime.datetime.today()
@@ -112,37 +110,13 @@ async def on_message(message):
                 c.execute ("INSERT INTO users VALUES(?,?,?,?,?,?,?)", datarow )
                 db.commit()
                 command_run = 1
-                logger.info("Registrierung gestartet für User %s mit Token %s" % (message.author.name,token))
+                logger.info("Registrierung gestartet für User %s mit Token %s", message.author.name, token)
 
             else: 
                 await client.send_message(message.author,"Sorry der Discordname oder der Steemname werden bereits in einer Registrierung verwendet.\nBitte nimm Kontakt mit jedigeiss auf um die Situation zu klären.")
                 command_run = 1
-                logger.info("Doppelte Registrierung versucht von User %s " % (message.author.name))
-#            else:    
-#                command_run = 1
-#                if userID not in liste and args[1] not in liste :    
-#                    liste[userID] = args[1] # append the userid and the steem handle to the dict
-#                    await client.send_message(message.channel, "Für die Discord ID <@%s> wurde die Steem ID %s registriert !" % (userID,liste[userID]) )
-#                    f = open(fname,"wb") #write the dict into a file
-#                    pickle.dump(liste,f)
-#                    f.close()
-#
-#                else:
-#                    await client.send_message(message.channel, "Die Discord ID <@%s> ist bereits mit der Steem ID %s verknüpft!" % (userID,liste[userID]) )
-#                    print (liste)           
-#                          
-#    if message.content.upper().startswith("?KILLALLUSERS"): # Function to empty the table, only admins can do that, handle with care
-#        executed = 0
-#        for role in message.author.roles:
-#            if role.name == "Admin":
-#                c.execute("DELETE FROM users")
-#                db.commit()
-#                executed = 1
-#                command_run = 1
-#                await client.send_message(message.channel, "Tabelle users wurde geleert!" )
-#        if executed == 0:
-#            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-#            command_run = 1
+                logger.info("Doppelte Registrierung versucht von User %s ", message.author.name)
+                
     
     if message.content.upper().startswith("?ADDUSER"): # Adduser manually to the users table
         executed = 0
@@ -163,16 +137,16 @@ async def on_message(message):
                     c.execute ("INSERT INTO users VALUES(?,?,?,?,?,?,?)", datarow )
                     db.commit()
                     await client.send_message(message.channel, "User %s wurde gespeichert!" % steemname )
-                    logger.info("Admin %s hat manuell User %s hinzugefügt" % (message.author.name,discordname))
+                    logger.info("Admin %s hat manuell User %s hinzugefügt", message.author.name, discordname)
                     command_run = 1
                 else:
                     await client.send_message(message.channel, "User existiert schon in der DB!" )
-                    logger.info("Adduser von Admin %s ist fehlgeschlagen - User existiert schon in der DB %s" % (message.author.name,discordname))
+                    logger.info("Adduser von Admin %s ist fehlgeschlagen - User existiert schon in der DB %s", message.author.name, discordname)
                     command_run = 1
                         
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )    
-            logger.info("Adduser von %s ist fehlgeschlagen - keine Adminrechte" % (message.author.name))
+            logger.info("Adduser von %s ist fehlgeschlagen - keine Adminrechte", message.author.name)
                     
     
     
@@ -192,14 +166,14 @@ async def on_message(message):
                         executed = 1
                         command_run = 1
                         await client.send_message(message.channel, "User %s wurde gelöscht!" %args[1] )
-                        logger.info("Killuser von Admin %s ausgeführt User %s gelöscht" % (message.author.name,args[1]))
+                        logger.info("Killuser von Admin %s ausgeführt User %s gelöscht", message.author.name, args[1])
                     
                     if len(result)==0:
                         await client.send_message(message.channel, "Kein User %s gefunden!" %args[1] )
                         executed = 1
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-            logger.info("Killuser von %s ist fehlgeschlagen - keine Adminrechte" % (message.author.name))
+            logger.info("Killuser von %s ist fehlgeschlagen - keine Adminrechte", message.author.name)
 
             command_run = 1
             
@@ -215,24 +189,22 @@ async def on_message(message):
                         users = str(args[1])
                         c.execute("SELECT * FROM users where steemname = ?", (users,))
                 
-                    result =c.fetchall()
-                    for r in result:
-                        await client.send_message(message.channel, "DiscordID: %s, DName: %s, SteemName: %s, Status: %s Voted: %s" % (r[0],r[1],r[2],r[4],r[6] )) 
-                    command_run = 1    
-                    executed = 1
-                    logger.info("Showusers von %s ist ausgeführt - Anzeige von %s" % (message.author.name,args[1]))
+                result =c.fetchall()
+                for r in result:
+                    await client.send_message(message.channel, "DiscordID: %s, DName: %s, SteemName: %s, Status: %s Voted: %s" % (r[0],r[1],r[2],r[4],r[6] )) 
+                command_run = 1    
+                executed = 1
+                logger.info("Showusers von %s ist ausgeführt", message.author.name)
 
                 if message.content.upper() =="?SHOWUSERS":
-                     c.execute("SELECT count(status) FROM users where status = ?", ("registered",))
-                     result=c.fetchone()
-                   
-                     await client.send_message(message.channel, "%s registrierte Benutzer" % (result)) 
-                     c.execute("SELECT count(status) FROM users where status = ?", ("pending steem",))
-                     result=c.fetchone()
-                     await client.send_message(message.channel, "%s Benutzer im Status pending steem" % (result)) 
-                     logger.info("Showuser Übersicht ausgeführt von %s" % (message.author.name))
-                     command_run = 1    
-                     executed = 1
+                    
+                    c.execute("SELECT count(status) FROM users where status = ?", ("registered",))
+                    result=c.fetchone()
+                    await client.send_message(message.channel, "%s registrierte Benutzer" % (result)) 
+                    c.execute("SELECT count(status) FROM users where status = ?", ("pending steem",))
+                    result=c.fetchone()
+                    await client.send_message(message.channel, "%s Benutzer im Status pending steem" % (result)) 
+                    logger.info("Showuser Übersicht ausgeführt von %s", message.author.name)
 
 
         if executed == 0:
@@ -253,49 +225,49 @@ async def on_message(message):
 #            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
 
             
-    if message.content.upper().startswith("?CHECKREG"): # Function to manually check incoming registrations, needs to be automatized in next version
-            executed = 0
-            for role in message.author.roles:
-                if role.name == "Admin":
-                    account = Account("dach-support")
-                    count = 0
-                    c.execute("SELECT * FROM users WHERE status = ?", ("pending steem",))
-                    result = c.fetchall()
-                    if len(result)==0:
-                        await client.send_message(message.channel, "Keine Registrierungen zum Überprüfen vorhanden!")
-                    elif len(result)>0:
-                        found = 0
-                        for r in result:
-                            discorduser= r[1]
-                            reguser = r[2]
-                            regtoken =r[3] 
-                            #print (reguser)
-                            
-                            
-                            for x in account.history(filter_by=["transfer"]):
-                                steemuser = x["from"]
-                                steemtoken = x["memo"]
-                                if reguser == steemuser and regtoken == steemtoken:
-                                    await client.send_message(message.channel, "Token Match!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
-                                    c.execute("UPDATE users SET status = ? where discordname = ?", ("registered",discorduser,))
-                                    u=discord.User(id=r[0])
-                                    await client.send_message(u, "Registrierung mit dem D-A-CH Support Bot abgeschlossen!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
-                                    found = 1
-                                    db.commit()
-                                    logger.info("Checkreg von %s ist ausgeführt - User %s registriert" % (message.author.name,discorduser))
+    if message.content.upper().startswith("?CHECKREG"):# Function to manually check incoming registrations, needs to be automatized in next version
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                account = Account("dach-support")
+                count = 0
+                c.execute("SELECT * FROM users WHERE status = ?", ("pending steem",))
+                result = c.fetchall()
+                if len(result)==0:
+                    await client.send_message(message.channel, "Keine Registrierungen zum Überprüfen vorhanden!")
+                elif len(result)>0:
+                    found = 0
+                    for r in result:
+                        discorduser= r[1]
+                        reguser = r[2]
+                        regtoken =r[3] 
+                        #print (reguser)
+                        
+                        
+                        for x in account.history(filter_by=["transfer"]):
+                            steemuser = x["from"]
+                            steemtoken = x["memo"]
+                            if reguser == steemuser and regtoken == steemtoken:
+                                await client.send_message(message.channel, "Token Match!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                c.execute("UPDATE users SET status = ? where discordname = ?", ("registered",discorduser,))
+                                u=discord.User(id=r[0])
+                                await client.send_message(u, "Registrierung mit dem D-A-CH Support Bot abgeschlossen!\nDiscordUser: %s ist jetzt mit Steemname: %s registriert" %(discorduser, steemuser))
+                                found = 1
+                                db.commit()
+                                logger.info("Checkreg von %s ist ausgeführt - User %s registriert", message.author.name, discorduser)
 
-                                #print (steemuser)
-                            #print(x)
-                        #await client.send_message(message.channel, "folgende infos vorhanden" % str(count))
-                    if found == 0:
-                        await client.send_message(message.channel, "Keine passenden Token in den eingehenden Transaktionen gefunden!")
-                        logger.info("Checkreg von %s ist ausgeführt - keine passenden Tokens" % (message.author.name))
+                            #print (steemuser)
+                        #print(x)
+                    #await client.send_message(message.channel, "folgende infos vorhanden" % str(count))
+                if found == 0:
+                    await client.send_message(message.channel, "Keine passenden Token in den eingehenden Transaktionen gefunden!")
+                    logger.info("Checkreg von %s ist ausgeführt - keine passenden Tokens", message.author.name)
 
-                    executed = 1
-                    command_run =1
-            if executed == 0:
-                await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-                logger.info("Checkreg von %s ist fehlgeschlagen - keine Adminrechte" % (message.author.name))
+                executed = 1
+                command_run =1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+            logger.info("Checkreg von %s ist fehlgeschlagen - keine Adminrechte", message.author.name)
 
                
     if message.content.upper().startswith("?STATUS"): # code for the status command, will list users and basic data about the bot
@@ -318,14 +290,14 @@ async def on_message(message):
         embed.add_field(name="Votingpower", value="%.2f Prozent" % resulting_vp, inline=False)
         embed.set_thumbnail(url="https://steemitimages.com/DQmSxg3TwiR7ZcTdH9WKH2To48eJsdQ7D1ejpYUmvLtuzUk/steemitdachfullress.png")
         await client.send_message(message.channel, embed=embed)
-        logger.info("Status von %s wurde ausgeführt" % (message.author.name))
+        logger.info("Status von %s wurde ausgeführt", message.author.name)
 
         command_run = 1
         
         
-    if message.content.upper().startswith("?HELP") or message.content.upper().startswith("§HILFE") : # code for the help function
+    if message.content.upper().startswith("?HELP") or message.content.upper().startswith("?HILFE") : # code for the help function
         await printhelp(message)
-        logger.info("Help von %s ist ausgeführt" % (message.author.name))
+        logger.info("Help von %s ist ausgeführt", message.author.name)
 
         command_run = 1
 
@@ -346,7 +318,7 @@ async def on_message(message):
                     picurl = (pos1[posanf:posend]) 
                     
                 steemlink = "https://steemit.com/@"+ account_name
-                cachedlink=("https://steemitimages.com/u/%s/avatar" % account_name)
+                #cachedlink=("https://steemitimages.com/u/%s/avatar" % account_name)
                 #print (sbd)
                 #print (cachedlink)
                 #profilepic = "https://img.busy.org/@" + account_name
@@ -422,19 +394,19 @@ async def on_message(message):
                 embed.set_footer(text="frisch von der Blockchain")
                 await client.send_message(message.channel, embed=embed) # send the built message
                 command_run = 1
-                logger.info("Infoanfrage von %s für Infos über %s ausgeführt" % (message.author.name,account_name))
+                logger.info("Infoanfrage von %s für Infos über %s ausgeführt", message.author.name, account_name)
 
             except TypeError as err:
                 await client.send_message(message.channel, "Fehler - kein SteemAccount mit dem Namen %s gefunden" % account_name)
                 print (err)
                 command_run = 1
-                logger.info("Infoanfrage von %s für %s ist fehlgeschlagen - keine User gefunden : %s" % (message.author.name,account_name,err))
+                logger.info("Infoanfrage von %s für %s ist fehlgeschlagen - keine User gefunden : %s", message.author.name, account_name, err)
 
         except IndexError as err:
             await client.send_message(message.channel, "Fehler - bitte Steemnamen nach §info eingeben")
             print (err)
             command_run = 1
-            logger.info("Infoanfrage von %s ist fehlgeschlagen - falscher Index %s" % (message.author.name,err))
+            logger.info("Infoanfrage von %s ist fehlgeschlagen - falscher Index %s", message.author.name, err)
 
             
             
@@ -566,19 +538,19 @@ async def on_message(message):
                 embed.set_footer(text="frisch von der Blockchain")
                 await client.send_message(message.channel, embed=embed) # send the built message
                 command_run = 1
-                logger.info("Long-Infoanfrage von %s für Infos über %s ausgeführt" % (message.author.name,account_name))
+                logger.info("Long-Infoanfrage von %s für Infos über %s ausgeführt", message.author.name, account_name)
 
             except TypeError as err:
                 await client.send_message(message.channel, "Fehler - kein SteemAccount mit dem Namen %s gefunden" % account_name)
                 print (err)
                 command_run = 1
-                logger.info("Long-Infoanfrage von %s für %s ist fehlgeschlagen - keine User gefunden : %s" % (message.author.name,account_name,err))
+                logger.info("Long-Infoanfrage von %s für %s ist fehlgeschlagen - keine User gefunden : %s", message.author.name, account_name, err)
                 
         except IndexError as err:
             await client.send_message(message.channel, "Fehler - bitte Steemnamen nach §info eingeben")
             print (err)
             command_run = 1
-            logger.info("Long-Infoanfrage von %s ist fehlgeschlagen - falscher Index %s" % (message.author.name,err))
+            logger.info("Long-Infoanfrage von %s ist fehlgeschlagen - falscher Index %s", message.author.name, err)
         
     
     if message.content.upper().startswith("?UPVOTE"): # code for the upvote command, writes the article and the author into a file to be used by the vote bot
@@ -588,7 +560,7 @@ async def on_message(message):
             check = 0
             if pos1 <= 0:
                 await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
-                logger.info("Upvote von %s gescheitert - Link nicht komplett" % (message.author.name))
+                logger.info("Upvote von %s gescheitert - Link nicht komplett", message.author.name)
 
                 check = check +1
             else:
@@ -600,12 +572,12 @@ async def on_message(message):
                 elapsed = Post.time_elapsed(article)
                 if elapsed >= datetime.timedelta(days=5):
                     await client.send_message(message.channel, "Fehler - Leider ist der Post älter als 5 Tage")
-                    logger.info("Upvote von %s gescheitert - Post älter als 5 Tage %s" % (message.author.name, args[1][pos1:length]))
+                    logger.info("Upvote von %s gescheitert - Post älter als 5 Tage %s", message.author.name, args[1][pos1:length])
                     check = check +1
                     command_run = 1
                 if article.is_main_post() is False:
                     await client.send_message(message.channel, "Fehler - Kommentare können nicht vorgeschlagen werden")
-                    logger.info("Upvote von %s gescheitert - Artikel kein root Post %s" % (message.author.name,args[1][pos1:length]))
+                    logger.info("Upvote von %s gescheitert - Artikel kein root Post %s", message.author.name, args[1][pos1:length])
 
                     check = check +1
                     command_run = 1
@@ -619,11 +591,11 @@ async def on_message(message):
                     await client.send_message(message.channel, "Upvote kann nur von registrierten Mitgliedern benutzt werden -- bitte zuerst ?register aufrufen!")
                     check = check +1 
                     command_run = 1
-                    logger.info("Upvote von %s gescheitert - User nicht registriert" % (message.author.name))
+                    logger.info("Upvote von %s gescheitert - User nicht registriert", message.author.name)
 
                 elif result[6] == "Yes":
                     await client.send_message(message.channel, "Du hast heute schon einmal gevoted!")
-                    logger.info("Upvote von %s gescheitert - User hat schon gevoted" % (message.author.name))
+                    logger.info("Upvote von %s gescheitert - User hat schon gevoted", message.author.name)
 
                     check = check +1
                     command_run = 1
@@ -632,13 +604,20 @@ async def on_message(message):
                     
                     if curator_name == steem_name:
                         await client.send_message(message.channel, "Fehler - Das Vorschlagen eigener Posts ist untersagt!")
-                        logger.info("Upvote von %s gescheitert - Eigener Post %s " % (message.author.name,args[1][pos1:length]))
-
+                        logger.info("Upvote von %s gescheitert - Eigener Post %s ", message.author.name, args[1][pos1:length])
+                        
                         check = check +1
                     else:
                         #check if the article is already in the list to vote
                         c.execute("SELECT * FROM articles WHERE permlink = (?)", (args[1][pos1:length],))
                         result = c.fetchone()
+                        
+                            # Check if the article is already in the database and has not already been voted
+                        if result is not None and result[3] != "No":
+                            check = 6
+                            await client.send_message(message.channel, "Artikel wurde bereits vorgeschlagen und mit %s gevoted" % result[3])
+                            command_run = 1
+                            
                         if result is not None and result[3] == "No": # Check if the article is already in the database and has not already been voted
                             votes=result[2]
                             votes = votes +1
@@ -648,7 +627,7 @@ async def on_message(message):
                             db.commit()
                             check = 5
                             command_run = 1
-                            logger.info("Upvote von %s erfolgreich - Votes auf %s wurden um 1 erhöht" % (message.author.name,args[1][pos1:length]))
+                            logger.info("Upvote von %s erfolgreich - Votes auf %s wurden um 1 erhöht", message.author.name, args[1][pos1:length])
 
                 if check == 0:
                     
@@ -656,7 +635,6 @@ async def on_message(message):
                     data = article.export()
                     title=data["title"]
                     author = data["author"]
-                    #print (title)
                     datarow =(registered_name,args[1][pos1:length],1,"No",title,author)
                     
                     # Insert the data into the SQLITE Table
@@ -667,12 +645,12 @@ async def on_message(message):
                     db.commit()
                     command_run = 1
                     await client.send_message(message.channel, "Erfolg - Du hast einen Post von %s beim D-A-CH Support eingereicht!" % steem_name )
-                    logger.info("Upvote von %s erfolgreich - Artikel %s neu eingetragen " % (message.author.name,args[1][pos1:length]))
+                    logger.info("Upvote von %s erfolgreich - Artikel %s neu eingetragen ", message.author.name, args[1][pos1:length])
 
         else:
             await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
             command_run =1
-            logger.info("Upvote von %s falsch aufgerufen" % (message.author.name))
+            logger.info("Upvote von %s falsch aufgerufen", message.author.name)
 
             
 #    if message.content.upper().startswith("?CHECKART"):
@@ -684,7 +662,9 @@ async def on_message(message):
 #        command_run =1
         
     if message.content.upper().startswith("?SHOWARTICLES"):
-        c.execute("SELECT * FROM articles where voted = ? ORDER BY votes DESC", ("No",))
+        #c.execute("SELECT * FROM articles where voted = ? ORDER BY votes DESC", ("No",))
+        c.execute("SELECT * FROM articles where voted =? ORDER BY votes DESC",("No",))
+        
         result = c.fetchall() 
         for r in result:
             #print(r)        
@@ -693,14 +673,37 @@ async def on_message(message):
             embed.add_field(name="Autor", value="[%s](%s) " % (str(r[5]),"https://steemit.com/@"+str(r[5])), inline=True)
             #embed.add_field(name="Kurator", value="%s" % r[0], inline=True)
             embed.add_field(name="Votes", value="%s" % int(r[2]), inline=True)
+            embed.add_field(name="Voted Prozent", value="%s" % r[3], inline=True)
+            
             embed.set_thumbnail(url="")
             #embed.timestamp=datetime.datetime.utcnow()
             #embed.set_footer(text="fresh from the DACH-BOT")
             await client.send_message(message.channel, embed=embed)
         #await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: \n %s " % result )
         command_run =1
-        logger.info("Showarticles von %s ausgeführt" % (message.author.name))
+        logger.info("Showarticles von %s ausgeführt", message.author.name)
 
+    if message.content.upper().startswith("?SHOWVOTED"):
+        #c.execute("SELECT * FROM articles where voted = ? ORDER BY votes DESC", ("No",))
+        c.execute("SELECT * FROM articles where voted NOT IN ('No') ORDER BY votes DESC")
+        
+        result = c.fetchall() 
+        for r in result:
+            #print(r)        
+            
+            embed = discord.Embed(title="Artikel:" , description="[%s](%s)" % (str(r[4]),"https://steemit.com/"+str(r[1])), color=0x00ff00)
+            embed.add_field(name="Autor", value="[%s](%s) " % (str(r[5]),"https://steemit.com/@"+str(r[5])), inline=True)
+            #embed.add_field(name="Kurator", value="%s" % r[0], inline=True)
+            embed.add_field(name="Votes", value="%s" % int(r[2]), inline=True)
+            embed.add_field(name="Voted Prozent", value="%s" % r[3], inline=True)
+            
+            #embed.set_thumbnail(url="")
+            #embed.timestamp=datetime.datetime.utcnow()
+            #embed.set_footer(text="fresh from the DACH-BOT")
+            await client.send_message(message.channel, embed=embed)
+        #await client.send_message(message.channel, "Folgend Artikel sind derzeit eingereicht: \n %s " % result )
+        command_run =1
+        logger.info("Showvoted von %s ausgeführt", message.author.name)
 
 
     
@@ -708,17 +711,18 @@ async def on_message(message):
         executed = 0
         for role in message.author.roles:
             if role.name == "Admin":
-                c.execute("DELETE FROM articles")
+                args = message.content.split(" ")
+                c.execute("DELETE FROM articles where author = ? AND voted = ?", (args[1],"No",))
                 db.commit()
                 executed = 1
-                await client.send_message(message.channel, "Tabelle articles wurde geleert!" )
-                logger.info("Killarticles von Admin %s ausgeführt - Tabelle geleert" % (message.author.name))
+                await client.send_message(message.channel, "Nicht gevoteter Artikel von %s enterfernt" % args[1] )
+                logger.info("Killarticles von Admin %s ausgeführt - Artikel von %s entfernt", message.author.name, args[1])
 
                 command_run = 1
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
             command_run = 1    
-            logger.info("Killarticles von %s gescheitert - Keine Rechte " % (message.author.name))
+            logger.info("Killarticles von %s gescheitert - Keine Rechte ", message.author.name)
 
     
     
@@ -738,12 +742,12 @@ async def on_message(message):
                 command_run = 1
                 executed = 1
                 await client.send_message(message.channel, "Meetup von %s in %s wurde hinzugefügt" % (str(args[2]),str(args[1])) )
-                logger.info("Addmeetup von Admin %s ausgeführt - Meetin in %s added" % (message.author.name,Ort))
+                logger.info("Addmeetup von Admin %s ausgeführt - Meetin in %s added", message.author.name, Ort)
 
         if executed == 0:  
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
             command_run = 1
-            logger.info("Addmeetup von %s gescheitert - Keine Rechte " % (message.author.name))
+            logger.info("Addmeetup von %s gescheitert - Keine Rechte ", message.author.name)
 
     
         
@@ -765,14 +769,19 @@ async def on_message(message):
         else:
             today = datetime.datetime.today()
             for r in result: # building the informations per meetup to fill the embed and post the message in a nice format
-                pos1 = r[2].find("@")
-                pos2 = r[2].find("/",pos1)
-                steemname = (r[2][pos1+1:pos2])
-                sbd = s.get_account(steemname)
-                picdest = (str(sbd["json_metadata"]))
-                posanf = picdest.find("profile_image")
-                posanf = posanf +16
-                posend = picdest.find("\"",posanf)
+                try:    
+                    pos1 = r[2].find("@")
+                    pos2 = r[2].find("/",pos1)
+                    steemname = (r[2][pos1+1:pos2])
+                    sbd = s.get_account(steemname)
+                    picdest = (str(sbd["json_metadata"]))
+                    posanf = picdest.find("profile_image")
+                    posanf = posanf +16
+                    posend = picdest.find("\"",posanf)
+                    picurl=(picdest[posanf:posend])
+                except Exception as e:
+                    logger.info("Kein Bild gefunden für Anzeige nextmeetups %s ", r[0])
+                    picurl = ""
                 deltadays = r[3] - today
                 daystomeetup = deltadays.days
                 
@@ -787,28 +796,32 @@ async def on_message(message):
                 embed.add_field(name="Link", value="[Link zum Steemit-Post](%s) " % str(r[2]), inline=True)
                 embed.add_field(name="Datum", value="%s" % datetime.datetime.strftime(r[3],"%d.%m.%Y"), inline=True)
                 embed.add_field(name="Tage bis zum Meetup", value="%s" % daystomeetup, inline=True)
-                embed.set_thumbnail(url=(picdest[posanf:posend]))
+                embed.set_thumbnail(url=picurl)
                 embed.timestamp=datetime.datetime.utcnow()
                 embed.set_footer(text="fresh from the DACH-BOT")
                 await client.send_message(message.channel, embed=embed)
                 command_run = 1
-                logger.info("Nextmeetups von %s ausgeführt" % (message.author.name))
+                logger.info("Nextmeetups von %s ausgeführt", message.author.name)
 
                 
                 
         
-#    if message.content.upper().startswith("?KILLMEETUP"): # Function to empty the table, only admins can do that, handle with care
-#        executed = 0
-#        for role in message.author.roles:
-#            if role.name == "Admin":
-#                c.execute("DELETE FROM meetup")
-#                db.commit()
-#                executed = 1
-#                await client.send_message(message.channel, "Tabelle meetup wurde geleert!" )
-#                command_run = 1
-#        if executed == 0:
-#            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
-#            command_run = 1
+    if message.content.upper().startswith("?KILLMEETUP"): # Function to empty the table, only admins can do that, handle with care
+        executed = 0
+        for role in message.author.roles:
+            if role.name == "Admin":
+                c.execute("DELETE FROM meetup")
+                db.commit()
+                executed = 1
+                await client.send_message(message.channel, "Tabelle meetup wurde geleert!" )
+                logger.info("Killmeetup von %s ausgeführt", message.author.name)
+
+                command_run = 1
+        if executed == 0:
+            await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )
+            logger.info("Killmeetups von %s nicht ausgeführt - Keine Rechte!", message.author.name)
+
+            command_run = 1
                 
     if message.content.upper().startswith("?MÄCHTIGERÖSI"): # special function for theaustrianguy and his welcoming project
         executed = 0
@@ -823,17 +836,133 @@ async def on_message(message):
                 await client.send_message(message.channel, "Der mächtige Ösi hat mit Welcoming %s Posts resteemed" % str(count) ) 
                 executed = 1
                 command_run = 1
-                logger.info("MÄCHTIGERösicommand von %s ausgeführt - %s reblogs" % (message.author.name,count))
+                logger.info("MÄCHTIGERösicommand von %s ausgeführt - %s reblogs", message.author.name, count)
 
         if executed == 0:
             await client.send_message(message.channel, "Du hast nicht die benötigten Berechtigungen den Befehl auszuführen" )    
             command_run = 1
-            logger.info("MÄCHTIGERösicommand von %s gescheitert - Keine Rechte!" % (message.author.name))
+            logger.info("MÄCHTIGERösicommand von %s gescheitert - Keine Rechte!", message.author.name)
 
+    if message.content.upper().startswith("?KURS"): # Display of price information from coinmarketcap
+        coinmarketcap = Market()
+        default = "Bitcoin"
+        print(len(message.content.strip()))
+        print (message.content[6])
+        if(len(message.content.strip()) > 5) and message.content[5] == " ":
+            args = message.content.split(" ")
+            if args[1].upper() == "SBD":
+                coin = "steem-dollars"
+            else:
+                coin = args[1]
+        else:
+            coin = default
+        #get the marketdata via api from coinmarketcap    
+        marketdata = coinmarketcap.ticker(coin, convert='EUR')
+        marketdata = str(marketdata)
+        marketdata = marketdata.replace("'", "\"")
+        marketdata = marketdata.replace("False","\"False\"")
+        marketdata = marketdata.replace("None","\"None\"")
+        marketdata = marketdata.replace("True","\"True\"")
+        found = marketdata.find("error")
+        if (found > -1): # Coinmarketcap replied with a coin not found error
+            await client.send_message(message.channel, "Die Coin %s wurde auf Coinmarketcap nicht gefunden" % coin)
+            command_run = 1
+        else:
+            marketdata = marketdata[1:(len(marketdata)-1)]
+            #loading the data with json and extractint what we need
+            parseddata = json.loads(marketdata)
+            priceusd = parseddata["price_usd"]
+            priceeur = parseddata["price_eur"]
+            pricebtc = parseddata["price_btc"]
+            name = parseddata["name"]
+            change1h = parseddata["percent_change_1h"]
+            change24h = parseddata["percent_change_24h"]
+            change7d = parseddata["percent_change_7d"]
+            embed = discord.Embed(title="Preis Übersicht :", description=name, color=0x00ff00)
+            embed.add_field(name="Preis USD", value="%.3f" % float(priceusd))
+            embed.add_field(name="Preis EUR", value="%.3f" % float(priceeur))
+            embed.add_field(name="Preis BTC", value="%s" % pricebtc)
+            embed.add_field(name="Change 1h", value="%s %%" % change1h)
+            embed.add_field(name="Change 24h", value="%s %%" % change24h)
+            embed.add_field(name="Change 7d", value="%s %%" % change7d)
+            #embed.add_field(name="Datum", value="%s" % datetime.datetime.strftime(r[3],"%d.%m.%Y"), inline=True)
+            #embed.add_field(name="Tage bis zum Meetup", value="%s" % daystomeetup, inline=True)
+            #embed.set_thumbnail(url=picurl)
+            embed.timestamp=datetime.datetime.utcnow()
+            embed.set_footer(text="fresh from the DACH-BOT and Coinmarketcap")
+            await client.send_message(message.channel, embed=embed)
+            logger.info("Kursübersicht ausgeführt für %s", message.author.name)
+            command_run = 1
+    
+    
+    
+    if message.content.upper().startswith("?WETTER"): # display of weather information
+        weather = Weather(unit=Unit.CELSIUS)
+        if(len(message.content.strip()) > 7) and message.content[7] == " ":
+            args = message.content.split(" ")
+        place = args[1]
+        location = weather.lookup_by_location(place)
+        condition = location.condition
+        forecasts = location.forecast
+        embed = discord.Embed(title="Wetter Übersicht für :", description=place, color=0x00ff00)
+        embed.add_field(name="Wetterlage Heute", value="%s bei %s Grad Celsius" % (condition.text,condition.temp))
+        embed.add_field(name="Vorhersage %s" % forecasts[1].date, value="%s %s bis %s Grad" % (forecasts[1].text,forecasts[1].low, forecasts[1].high), inline=False)
+        embed.add_field(name="Vorhersage %s" % forecasts[2].date, value=("%s %s bis %s Grad" % (forecasts[2].text,forecasts[2].low, forecasts[2].high)), inline=False)
+        embed.timestamp=datetime.datetime.utcnow()
+        embed.set_footer(text="fresh from the DACH-BOT and Yahoo Weather")
+        await client.send_message(message.channel, embed=embed)
+        logger.info("Wetter ausgeführt für %s", message.author.name)
+        command_run = 1
             
+    if message.content.upper().startswith("?CHUCK"): #get a chuck norris gag and broadcast it
+        cn = ChuckNorris()
+
+        # Get random jokes.
+        data = cn.random()
+        # display of version and thanks
+        await client.send_message(message.channel, "%s" % data.joke )
+        logger.info("Chuck ausgeführt für %s", message.author.name)
+        command_run = 1
+            
+    if message.content.upper().startswith("?CLEARVOTES"):
+        
+        for role in message.author.roles:  
+            if role.name == "Admin":
+                #args = message.content.split(" ")
+                executed =1
+                c.execute("UPDATE users SET has_voted = ?", ("No",))
+                db.commit()
+                           
+                # display of version and thanks
+                await client.send_message(message.channel, "Votes zurückgesetzt für alle User")
+                command_run = 1
+                logger.info("Votes für alle zurückgesetzt von Admin %s", message.author.name)
+        
+    if message.content.upper().startswith("?SETVOTES"):
+        
+        for role in message.author.roles:  
+            if role.name == "Admin":
+                args = message.content.split(" ")
+                executed =1
+                c.execute("UPDATE users SET has_voted = ? where steemname = ?", ("Yes",args[1],))
+                db.commit()
+                           
+                # display of version and thanks
+                await client.send_message(message.channel, "Voted auf yes gesetzt für User %s" % args[1])
+                command_run = 1        
+# =============================================================================
+#     if message.content.upper().startswith("?CLEARVOTED"): #set all the votes to zero, more a test function than a real one
+#         c.execute("UPDATE articles SET voted = ?", ("No",))
+#         db.commit()
+#                           
+#         # display of version and thanks
+#         await client.send_message(message.channel, "Alle Votes auf den Artikeln zurückgesetzt!")
+#         command_run = 1
+# =============================================================================
+                
             
     if message.content.upper().startswith("?VERSION"): # display of version and thanks
-        await client.send_message(message.channel, "D-A-CH Bot Version 0.4.1, brought to you by jedigeiss\nThanks to: louis88, rivalzzz, theaustrianguy, asperger-kids and mys" )
+        await client.send_message(message.channel, "D-A-CH Bot Version 0.6.1, brought to you by jedigeiss\nThanks to: louis88, rivalzzz, theaustrianguy, asperger-kids and mys" )
         command_run = 1
         
     
@@ -848,31 +977,26 @@ async def on_message(message):
                     check = 0
                     if pos1 <= 0:
                         await client.send_message(message.channel, "Fehler - Bitte den kompletten Link hinter §upvote einfügen, beginnend mit http...")
-                       # check = check +1
                     else:
                         pos2 = args[1].find("/",pos1)
                         steem_name = (args[1][pos1+1:pos2])
                         length = len(args[1])
                         article = (args[1][pos1:length])
-                        #print (article)
                         percentage = int(args[2])
-                        #print (percentage)
-                        #print (permlink)
-                        #print (percentage)
                         try: 
                             s.vote(article,percentage)
                             #await asyncio.sleep(1)
                             await client.send_message(message.channel, "Artikel %s erfolgreich mit %.2f Prozent gevoted!" % (article,percentage))
-                            logger.info("Manuelles Upvote von %s mit %.2f Prozent ausgeführt, Post : %s" % (message.author.name,percent,article))
+                            logger.info("Manuelles Upvote von %s mit %.2f Prozent ausgeführt, Post : %s", message.author.name, percentage, article)
                         except Exception as e:
                             print (repr(e))
-                            logger.info("Manuelles upvote von %s auf %s gescheitert Fehlercode : %s" % (message.author.name,article,e))
+                            logger.info("Manuelles upvote von %s auf %s gescheitert Fehlercode : %s", message.author.name, article, e)
                             await client.send_message(message.channel, "Da ging was schief! Hast du vielleicht für den Artikel schon gevoted?")
                 else: 
                     await client.send_message(message.channel, "Bitte ?vote Permlink Prozent benutzen!")
         if executed == 0:
             await client.send_message(message.channel, "Du hast keine Berechtigung den Befehl auszuführen!")
-            logger.info("Manueller Vote von %s gescheitert - Keine Rechte" % (message.author.name))
+            logger.info("Manueller Vote von %s gescheitert - Keine Rechte", message.author.name)
             command_run =1
     
     
